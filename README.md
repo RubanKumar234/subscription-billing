@@ -77,6 +77,8 @@ Responses: `201` for a new event, `200` for an identical retry, `409` if the eve
 
 Run `php artisan db:seed --class=DemoBillingSeeder`. It prints demo merchant, plan, customer, and subscription IDs. The seeder is repeatable; it creates an upgrade and usage in the previous and current months. Issue a key with `php artisan merchant:issue-key <merchant_id>`, then use that key in the `X-Merchant-Key` header for both endpoints. Only the key hash is stored; use HTTPS outside local development.
 
+In PowerShell, `& .\scripts\Test-Usage.ps1 -CustomerId <customer_id>` prompts for the key, submits a new event, and retries the identical request. It prints the exact URL and both JSON responses. Start `php artisan serve --host=127.0.0.1 --port=8000` in another terminal first.
+
 Run `php artisan usage:aggregate` to queue daily aggregation, then process the Redis queue. Run `php artisan billing:close YYYY-MM` for a completed month and process the queue again. Month close aggregates remaining events before invoicing. The command defaults to the previous UTC month when no month is given. Repeating it does not duplicate invoices.
 
 Other commands: `php artisan subscription:start <customer_id> <plan_id> [ISO-8601-time]` and `php artisan subscription:change-plan <subscription_id> <plan_id> [ISO-8601-time]`. Both copy cached plan prices into immutable subscription segments. A plan change is rejected if later usage already exists or the period has been finalized.
