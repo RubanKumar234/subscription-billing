@@ -2,8 +2,15 @@
 
 namespace App\Services;
 
+use App\Models\UsageEvent;
+use App\Models\SubscriptionSegment;
+use App\Models\Subscription;
+use App\Models\InvoiceLine;
+use App\Models\Invoice;
+use App\Models\DailyUsage;
+use Illuminate\Database\Query\Expression;
+
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 class InvoiceGenerator
@@ -23,11 +30,11 @@ class InvoiceGenerator
             throw new RuntimeException('The billing period has not ended.');
         }
 
-        return DB::transaction(function () use ($subscriptionId, $periodStart, $periodEnd) {
+        return Subscription::query()->getConnection()->transaction(function () use ($subscriptionId, $periodStart, $periodEnd) {
             // Lock before ordinary reads so finalized invoices include every committed event.
-            DB::table('subscriptions')->where('id', $subscriptionId)->lockForUpdate()->first();
+            Subscription::query()->where('id', $subscriptionId)->lockForUpdate()->first();
 
-            $subscription = DB::table('subscriptions as subscription')
+            $subscription = Subscription::query()->from('subscriptions as subscription')
                 ->join('customers as customer', 'customer.id', '=', 'subscription.customer_id')
                 ->join('merchants as merchant', 'merchant.id', '=', 'customer.merchant_id')
                 ->where('subscription.id', $subscriptionId)
@@ -40,7 +47,7 @@ class InvoiceGenerator
 
             $start = $periodStart->format('Y-m-d H:i:s.u');
             $end = $periodEnd->format('Y-m-d H:i:s.u');
-            $existing = DB::table('invoices')
+            $existing = Invoice::query()
                 ->where('subscription_id', $subscriptionId)
                 ->where('period_start', $start)
                 ->where('period_end', $end)
@@ -54,7 +61,7 @@ class InvoiceGenerator
                 throw new RuntimeException('Subscription does not overlap the billing period.');
             }
 
-            $segments = DB::table('subscription_segments')
+            $segments = SubscriptionSegment::query()
                 ->where('subscription_id', $subscriptionId)
                 ->where('starts_at', '<', $end)
                 ->where(function ($query) use ($start) {
@@ -67,7 +74,7 @@ class InvoiceGenerator
                 throw new RuntimeException('No plan segment overlaps the billing period.');
             }
 
-            $pending = DB::table('usage_events')
+            $pending = UsageEvent::query()
                 ->whereIn('subscription_segment_id', $segments->pluck('id'))
                 ->where('occurred_at', '>=', $start)
                 ->where('occurred_at', '<', $end)
@@ -78,15 +85,15 @@ class InvoiceGenerator
                 throw new RuntimeException('Unaggregated usage remains in this billing period.');
             }
 
-            $usage = DB::table('daily_usage')
+            $usage = DailyUsage::query()
                 ->whereIn('subscription_segment_id', $segments->pluck('id'))
                 ->where('usage_date', '>=', $periodStart->toDateString())
                 ->where('usage_date', '<', $periodEnd->toDateString())
                 ->groupBy('subscription_segment_id')
-                ->select('subscription_segment_id', DB::raw('SUM(units) as total_units'))
+                ->select('subscription_segment_id', new Expression('SUM(units) as total_units'))
                 ->pluck('total_units', 'subscription_segment_id');
 
-            $invoiceId = DB::table('invoices')->insertGetId([
+            $invoiceId = Invoice::query()->insertGetId([
                 'subscription_id' => $subscriptionId,
                 'period_start' => $start,
                 'period_end' => $end,
@@ -129,7 +136,7 @@ class InvoiceGenerator
                 }
             }
 
-            DB::table('invoices')->where('id', $invoiceId)->update([
+            Invoice::query()->where('id', $invoiceId)->update([
                 'status' => 'finalized',
                 'subtotal_minor' => $total,
                 'total_minor' => $total,
@@ -143,7 +150,7 @@ class InvoiceGenerator
 
     private function line(int $invoiceId, int $segmentId, string $type, string $description, string $quantity, string $rate, int $amount): void
     {
-        DB::table('invoice_lines')->insert([
+        InvoiceLine::query()->insert([
             'invoice_id' => $invoiceId,
             'subscription_segment_id' => $segmentId,
             'type' => $type,

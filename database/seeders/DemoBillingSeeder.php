@@ -2,12 +2,16 @@
 
 namespace Database\Seeders;
 
+use App\Models\UsageEvent;
+use App\Models\SubscriptionSegment;
+use App\Models\Subscription;
+use App\Models\Merchant;
+use App\Models\Customer;
 use App\Models\Plan;
 use App\Services\SubscriptionManager;
 use App\Services\UsageRecorder;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 class DemoBillingSeeder extends Seeder
@@ -18,9 +22,9 @@ class DemoBillingSeeder extends Seeder
         $currentStart = $previousStart->addMonth();
         $changeAt = $previousStart->addDays(15);
 
-        $merchantId = DB::table('merchants')->where('name', 'Mallow Billing Demo')->value('id');
+        $merchantId = Merchant::query()->where('name', 'Mallow Billing Demo')->value('id');
         if (! $merchantId) {
-            $merchantId = DB::table('merchants')->insertGetId([
+            $merchantId = Merchant::query()->insertGetId([
                 'name' => 'Mallow Billing Demo', 'status' => 'active', 'currency' => 'INR',
             ]);
         }
@@ -42,7 +46,7 @@ class DemoBillingSeeder extends Seeder
         $subscriptionOne = $this->subscription($manager, $customerOne, $basic->id, $previousStart);
         $subscriptionTwo = $this->subscription($manager, $customerTwo, $basic->id, $previousStart);
 
-        if (! DB::table('subscription_segments')->where('subscription_id', $subscriptionOne)
+        if (! SubscriptionSegment::query()->where('subscription_id', $subscriptionOne)
             ->where('starts_at', $changeAt->format('Y-m-d H:i:s.u'))->exists()) {
             $manager->changePlan($subscriptionOne, $growth->id, $changeAt->toIso8601String());
         }
@@ -61,16 +65,16 @@ class DemoBillingSeeder extends Seeder
 
     private function customer(int $merchantId, string $name): int
     {
-        $id = DB::table('customers')->where('merchant_id', $merchantId)->where('name', $name)->value('id');
+        $id = Customer::query()->where('merchant_id', $merchantId)->where('name', $name)->value('id');
 
-        return $id ?: DB::table('customers')->insertGetId([
+        return $id ?: Customer::query()->insertGetId([
             'merchant_id' => $merchantId, 'name' => $name,
         ]);
     }
 
     private function subscription(SubscriptionManager $manager, int $customerId, int $planId, CarbonImmutable $start): int
     {
-        $id = DB::table('subscriptions')->where('customer_id', $customerId)
+        $id = Subscription::query()->where('customer_id', $customerId)
             ->where('started_at', $start->format('Y-m-d H:i:s.u'))->value('id');
 
         return $id ?: $manager->start($customerId, $planId, $start->toIso8601String());
@@ -78,7 +82,7 @@ class DemoBillingSeeder extends Seeder
 
     private function event(int $merchantId, int $customerId, string $eventId, CarbonImmutable $at, int $units): void
     {
-        if (DB::table('usage_events')->where('merchant_id', $merchantId)->where('event_id', $eventId)->exists()) {
+        if (UsageEvent::query()->where('merchant_id', $merchantId)->where('event_id', $eventId)->exists()) {
             return;
         }
 

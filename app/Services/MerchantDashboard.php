@@ -2,8 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\SubscriptionSegment;
+use App\Models\Merchant;
+use App\Models\DailyUsage;
+use Illuminate\Database\Query\Expression;
+
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 class MerchantDashboard
@@ -17,7 +21,7 @@ class MerchantDashboard
 
     public function forMerchant(int $merchantId): array
     {
-        $merchant = DB::table('merchants')->where('id', $merchantId)->first();
+        $merchant = Merchant::query()->where('id', $merchantId)->first();
         if (! $merchant) {
             throw new RuntimeException('Merchant not found.');
         }
@@ -31,7 +35,7 @@ class MerchantDashboard
             ->addDays(min($now->day, $previousStart->daysInMonth))
             ->toDateString();
 
-        $top = DB::table('daily_usage as daily')
+        $top = DailyUsage::query()->from('daily_usage as daily')
             ->join('subscription_segments as segment', 'segment.id', '=', 'daily.subscription_segment_id')
             ->join('subscriptions as subscription', 'subscription.id', '=', 'segment.subscription_id')
             ->join('customers as customer', 'customer.id', '=', 'subscription.customer_id')
@@ -41,14 +45,14 @@ class MerchantDashboard
             ->groupBy('customer.id', 'customer.name')
             ->orderByDesc('usage_units')
             ->limit(5)
-            ->select('customer.id', 'customer.name', DB::raw('SUM(daily.units) as usage_units'))
+            ->select('customer.id', 'customer.name', new Expression('SUM(daily.units) as usage_units'))
             ->get()
             ->map(function ($row) {
                 return ['customer_id' => (int) $row->id, 'name' => $row->name, 'usage_units' => (int) $row->usage_units];
             })
             ->all();
 
-        $churn = DB::table('daily_usage as daily')
+        $churn = DailyUsage::query()->from('daily_usage as daily')
             ->join('subscription_segments as segment', 'segment.id', '=', 'daily.subscription_segment_id')
             ->join('subscriptions as subscription', 'subscription.id', '=', 'segment.subscription_id')
             ->join('customers as customer', 'customer.id', '=', 'subscription.customer_id')
@@ -92,7 +96,7 @@ class MerchantDashboard
 
     private function projectedOverage(int $merchantId, CarbonImmutable $start, CarbonImmutable $end, CarbonImmutable $now): int
     {
-        $segments = DB::table('subscription_segments as segment')
+        $segments = SubscriptionSegment::query()->from('subscription_segments as segment')
             ->join('subscriptions as subscription', 'subscription.id', '=', 'segment.subscription_id')
             ->join('customers as customer', 'customer.id', '=', 'subscription.customer_id')
             ->where('customer.merchant_id', $merchantId)
@@ -111,12 +115,12 @@ class MerchantDashboard
 
         $total = 0;
         foreach ($segments->chunk(500) as $chunk) {
-            $usage = DB::table('daily_usage')
+            $usage = DailyUsage::query()
                 ->whereIn('subscription_segment_id', $chunk->pluck('id'))
                 ->where('usage_date', '>=', $start->toDateString())
                 ->where('usage_date', '<=', $now->toDateString())
                 ->groupBy('subscription_segment_id')
-                ->select('subscription_segment_id', DB::raw('SUM(units) as total_units'))
+                ->select('subscription_segment_id', new Expression('SUM(units) as total_units'))
                 ->pluck('total_units', 'subscription_segment_id');
 
             foreach ($chunk as $segment) {

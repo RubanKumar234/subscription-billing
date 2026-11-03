@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Subscription;
 use App\Services\BillingPeriod;
 use App\Services\InvoiceGenerator;
 use Illuminate\Bus\Queueable;
@@ -9,7 +10,6 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\DB;
 
 class GenerateMonthlyInvoicesJob implements ShouldQueue
 {
@@ -30,7 +30,7 @@ class GenerateMonthlyInvoicesJob implements ShouldQueue
     public function handle(InvoiceGenerator $generator)
     {
         [$start, $end] = BillingPeriod::forMonth($this->month);
-        $subscriptions = DB::table('subscriptions')
+        $subscriptions = Subscription::query()
             ->where('id', '>', $this->afterId)
             ->where('started_at', '<', $end->format('Y-m-d H:i:s.u'))
             ->where(function ($query) use ($start) {

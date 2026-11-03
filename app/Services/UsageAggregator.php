@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\UsageEvent;
+use App\Models\Subscription;
+use App\Models\DailyUsage;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 
 class UsageAggregator
 {
@@ -11,8 +13,8 @@ class UsageAggregator
 
     public function processBatch(?string $month = null): int
     {
-        return DB::transaction(function () use ($month) {
-            $query = DB::table('usage_events')
+        return Subscription::query()->getConnection()->transaction(function () use ($month) {
+            $query = UsageEvent::query()
                 ->whereNull('processed_at')
                 ->orderBy('occurred_at')
                 ->orderBy('id')
@@ -46,14 +48,14 @@ class UsageAggregator
 
             $now = Carbon::now('UTC')->format('Y-m-d H:i:s');
             foreach ($totals as $total) {
-                DB::statement(
+                DailyUsage::query()->getConnection()->statement(
                     'INSERT INTO daily_usage (subscription_segment_id, usage_date, units, created_at, updated_at) '
                     .'VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE units = units + VALUES(units), updated_at = VALUES(updated_at)',
                     [$total['segment_id'], $total['date'], $total['units'], $now, $now]
                 );
             }
 
-            DB::table('usage_events')
+            UsageEvent::query()
                 ->whereIn('id', $events->pluck('id'))
                 ->update(['processed_at' => $now]);
 

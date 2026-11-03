@@ -2,8 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\UsageEvent;
+use App\Models\SubscriptionSegment;
+use App\Models\Subscription;
+use App\Models\Merchant;
+use App\Models\Invoice;
+use App\Models\Customer;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 class SubscriptionManager
@@ -19,13 +24,13 @@ class SubscriptionManager
     {
         $startsAt = Carbon::parse($startsAt)->utc()->format('Y-m-d H:i:s.u');
 
-        return DB::transaction(function () use ($customerId, $planId, $startsAt) {
-            $customer = DB::table('customers')->where('id', $customerId)->lockForUpdate()->first();
+        return Subscription::query()->getConnection()->transaction(function () use ($customerId, $planId, $startsAt) {
+            $customer = Customer::query()->where('id', $customerId)->lockForUpdate()->first();
             if (! $customer) {
                 throw new RuntimeException('Customer not found.');
             }
 
-            if (DB::table('subscriptions')->where('customer_id', $customerId)
+            if (Subscription::query()->where('customer_id', $customerId)
                 ->where(function ($query) use ($startsAt) {
                     $query->whereNull('ended_at')->orWhere('ended_at', '>', $startsAt);
                 })->exists()) {
@@ -35,7 +40,7 @@ class SubscriptionManager
             $plan = $this->pricing->get((int) $customer->merchant_id, $planId);
             $this->assertPlanMatchesMerchant($customer->merchant_id, $plan);
 
-            $subscriptionId = DB::table('subscriptions')->insertGetId([
+            $subscriptionId = Subscription::query()->insertGetId([
                 'customer_id' => $customerId,
                 'started_at' => $startsAt,
                 'status' => 'active',
@@ -53,26 +58,26 @@ class SubscriptionManager
     {
         $at = Carbon::parse($at)->utc()->format('Y-m-d H:i:s.u');
 
-        return DB::transaction(function () use ($subscriptionId, $planId, $at) {
-            $subscription = DB::table('subscriptions')->where('id', $subscriptionId)->lockForUpdate()->first();
+        return Subscription::query()->getConnection()->transaction(function () use ($subscriptionId, $planId, $at) {
+            $subscription = Subscription::query()->where('id', $subscriptionId)->lockForUpdate()->first();
             if (! $subscription || $subscription->status !== 'active' || $subscription->started_at >= $at ||
                 ($subscription->ended_at && $subscription->ended_at <= $at)) {
                 throw new RuntimeException('No active subscription exists at the requested time.');
             }
 
-            $customer = DB::table('customers')->where('id', $subscription->customer_id)->first();
+            $customer = Customer::query()->where('id', $subscription->customer_id)->first();
             $plan = $this->pricing->get((int) $customer->merchant_id, $planId);
             $this->assertPlanMatchesMerchant($customer->merchant_id, $plan);
 
             $monthStart = Carbon::parse($at, 'UTC')->startOfMonth()->format('Y-m-d H:i:s.u');
             $monthEnd = Carbon::parse($at, 'UTC')->startOfMonth()->addMonth()->format('Y-m-d H:i:s.u');
-            if (DB::table('invoices')->where('subscription_id', $subscriptionId)
+            if (Invoice::query()->where('subscription_id', $subscriptionId)
                 ->where('period_start', $monthStart)->where('period_end', $monthEnd)
                 ->where('status', 'finalized')->exists()) {
                 throw new RuntimeException('Cannot change a plan in a finalized billing period.');
             }
 
-            $current = DB::table('subscription_segments')
+            $current = SubscriptionSegment::query()
                 ->where('subscription_id', $subscriptionId)
                 ->whereNull('ends_at')
                 ->lockForUpdate()
@@ -81,12 +86,12 @@ class SubscriptionManager
                 throw new RuntimeException('Plan change must occur after the current segment starts.');
             }
 
-            if (DB::table('usage_events')->where('subscription_segment_id', $current->id)
+            if (UsageEvent::query()->where('subscription_segment_id', $current->id)
                 ->where('occurred_at', '>=', $at)->exists()) {
                 throw new RuntimeException('Usage already exists after the requested plan change time.');
             }
 
-            DB::table('subscription_segments')->where('id', $current->id)->update([
+            SubscriptionSegment::query()->where('id', $current->id)->update([
                 'ends_at' => $at,
                 'updated_at' => now('UTC'),
             ]);
@@ -97,7 +102,7 @@ class SubscriptionManager
 
     private function assertPlanMatchesMerchant(int $merchantId, array $plan): void
     {
-        $currency = DB::table('merchants')->where('id', $merchantId)->value('currency');
+        $currency = Merchant::query()->where('id', $merchantId)->value('currency');
         if ($plan['currency'] !== $currency || $plan['billing_cycle'] !== 'monthly') {
             throw new RuntimeException('Plan must use the merchant currency and a monthly cycle.');
         }
@@ -105,7 +110,7 @@ class SubscriptionManager
 
     private function insertSegment(int $subscriptionId, array $plan, string $startsAt): int
     {
-        return DB::table('subscription_segments')->insertGetId([
+        return SubscriptionSegment::query()->insertGetId([
             'subscription_id' => $subscriptionId,
             'plan_id' => $plan['plan_id'],
             'starts_at' => $startsAt,

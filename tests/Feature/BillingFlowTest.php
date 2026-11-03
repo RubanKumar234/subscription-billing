@@ -2,13 +2,19 @@
 
 namespace Tests\Feature;
 
+use App\Models\UsageEvent;
+use App\Models\SubscriptionSegment;
+use App\Models\Merchant;
+use App\Models\InvoiceLine;
+use App\Models\Invoice;
+use App\Models\DailyUsage;
+use App\Models\Customer;
 use App\Models\Plan;
 use App\Services\InvoiceGenerator;
 use App\Services\PlanPricingRepository;
 use App\Services\SubscriptionManager;
 use App\Services\UsageAggregator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class BillingFlowTest extends TestCase
@@ -21,10 +27,10 @@ class BillingFlowTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->merchantId = DB::table('merchants')->insertGetId([
+        $this->merchantId = Merchant::query()->insertGetId([
             'name' => 'Billing Merchant', 'status' => 'active', 'currency' => 'INR',
         ]);
-        $this->customerId = DB::table('customers')->insertGetId([
+        $this->customerId = Customer::query()->insertGetId([
             'merchant_id' => $this->merchantId, 'name' => 'Billing Customer',
         ]);
     }
@@ -45,7 +51,7 @@ class BillingFlowTest extends TestCase
 
     private function daily(int $segmentId, string $date, int $units): void
     {
-        DB::table('daily_usage')->insert([
+        DailyUsage::query()->insert([
             'subscription_segment_id' => $segmentId,
             'usage_date' => $date,
             'units' => $units,
@@ -56,18 +62,18 @@ class BillingFlowTest extends TestCase
     {
         $plan = $this->plan('Starter', 3100, 310, '2.000000');
         $subscriptionId = app(SubscriptionManager::class)->start($this->customerId, $plan->id, '2025-10-16T00:00:00Z');
-        $segmentId = DB::table('subscription_segments')->where('subscription_id', $subscriptionId)->value('id');
+        $segmentId = SubscriptionSegment::query()->where('subscription_id', $subscriptionId)->value('id');
         $this->daily($segmentId, '2025-10-20', 200);
 
         $invoiceId = app(InvoiceGenerator::class)->generate($subscriptionId, '2025-10');
-        $invoice = DB::table('invoices')->where('id', $invoiceId)->first();
-        $lines = DB::table('invoice_lines')->where('invoice_id', $invoiceId)->pluck('amount_minor', 'type');
+        $invoice = Invoice::query()->where('id', $invoiceId)->first();
+        $lines = InvoiceLine::query()->where('invoice_id', $invoiceId)->pluck('amount_minor', 'type');
 
         $this->assertSame(1680, (int) $invoice->total_minor);
         $this->assertSame(1600, (int) $lines['base']);
         $this->assertSame(80, (int) $lines['overage']);
         $this->assertSame($invoiceId, app(InvoiceGenerator::class)->generate($subscriptionId, '2025-10'));
-        $this->assertSame(1, DB::table('invoices')->count());
+        $this->assertSame(1, Invoice::query()->count());
     }
 
     public function test_upgrade_bills_each_segments_usage_at_its_own_rate()
@@ -76,16 +82,16 @@ class BillingFlowTest extends TestCase
         $new = $this->plan('New', 6200, 620, '3.000000');
         $manager = app(SubscriptionManager::class);
         $subscriptionId = $manager->start($this->customerId, $old->id, '2025-10-01T00:00:00Z');
-        $oldSegmentId = DB::table('subscription_segments')->where('subscription_id', $subscriptionId)->value('id');
+        $oldSegmentId = SubscriptionSegment::query()->where('subscription_id', $subscriptionId)->value('id');
         $newSegmentId = $manager->changePlan($subscriptionId, $new->id, '2025-10-16T00:00:00Z');
         $this->daily($oldSegmentId, '2025-10-10', 200);
         $this->daily($newSegmentId, '2025-10-20', 400);
 
         $invoiceId = app(InvoiceGenerator::class)->generate($subscriptionId, '2025-10');
-        $lines = DB::table('invoice_lines')->where('invoice_id', $invoiceId)
+        $lines = InvoiceLine::query()->where('invoice_id', $invoiceId)
             ->orderBy('subscription_segment_id')->orderBy('id')->get();
 
-        $this->assertSame(5040, (int) DB::table('invoices')->where('id', $invoiceId)->value('total_minor'));
+        $this->assertSame(5040, (int) Invoice::query()->where('id', $invoiceId)->value('total_minor'));
         $this->assertSame([1500, 100, 3200, 240], $lines->pluck('amount_minor')->map(function ($value) {
             return (int) $value;
         })->all());
@@ -97,16 +103,16 @@ class BillingFlowTest extends TestCase
         $low = $this->plan('Low', 3100, 310, '2.000000');
         $manager = app(SubscriptionManager::class);
         $subscriptionId = $manager->start($this->customerId, $high->id, '2025-10-01T00:00:00Z');
-        $oldSegmentId = DB::table('subscription_segments')->where('subscription_id', $subscriptionId)->value('id');
+        $oldSegmentId = SubscriptionSegment::query()->where('subscription_id', $subscriptionId)->value('id');
         $newSegmentId = $manager->changePlan($subscriptionId, $low->id, '2025-10-16T00:00:00Z');
         $this->daily($oldSegmentId, '2025-10-10', 300);
         $this->daily($newSegmentId, '2025-10-20', 160);
 
         $invoiceId = app(InvoiceGenerator::class)->generate($subscriptionId, '2025-10');
 
-        $this->assertSame(4600, (int) DB::table('invoices')->where('id', $invoiceId)->value('total_minor'));
-        $this->assertSame(0, DB::table('invoice_lines')->where('invoice_id', $invoiceId)->where('type', 'overage')->count());
-        $this->assertSame($newSegmentId, (int) DB::table('subscription_segments')->whereNull('ends_at')->value('id'));
+        $this->assertSame(4600, (int) Invoice::query()->where('id', $invoiceId)->value('total_minor'));
+        $this->assertSame(0, InvoiceLine::query()->where('invoice_id', $invoiceId)->where('type', 'overage')->count());
+        $this->assertSame($newSegmentId, (int) SubscriptionSegment::query()->whereNull('ends_at')->value('id'));
     }
 
     public function test_plan_price_cache_invalidates_but_old_segment_keeps_its_snapshot()
@@ -119,14 +125,14 @@ class BillingFlowTest extends TestCase
         $plan->update(['base_price_minor' => 6200]);
 
         $this->assertSame(6200, $pricing->get($this->merchantId, $plan->id)['base_price_minor']);
-        $this->assertSame(3100, (int) DB::table('subscription_segments')->where('subscription_id', $subscriptionId)->value('base_price_minor'));
+        $this->assertSame(3100, (int) SubscriptionSegment::query()->where('subscription_id', $subscriptionId)->value('base_price_minor'));
     }
 
     public function test_aggregation_processes_bounded_batches_and_retry_does_not_double_count()
     {
         $plan = $this->plan('Usage', 0, 0, '1.000000');
         $subscriptionId = app(SubscriptionManager::class)->start($this->customerId, $plan->id, '2025-10-01T00:00:00Z');
-        $segmentId = DB::table('subscription_segments')->where('subscription_id', $subscriptionId)->value('id');
+        $segmentId = SubscriptionSegment::query()->where('subscription_id', $subscriptionId)->value('id');
         $events = [];
         for ($id = 1; $id <= 501; $id++) {
             $events[] = [
@@ -139,23 +145,23 @@ class BillingFlowTest extends TestCase
             ];
         }
         foreach (array_chunk($events, 200) as $chunk) {
-            DB::table('usage_events')->insert($chunk);
+            UsageEvent::query()->insert($chunk);
         }
 
         $aggregator = app(UsageAggregator::class);
         $this->assertSame(500, $aggregator->processBatch('2025-10'));
         $this->assertSame(1, $aggregator->processBatch('2025-10'));
         $this->assertSame(0, $aggregator->processBatch('2025-10'));
-        $this->assertSame(501, (int) DB::table('daily_usage')->where('subscription_segment_id', $segmentId)->value('units'));
-        $this->assertSame(501, DB::table('usage_events')->whereNotNull('processed_at')->count());
+        $this->assertSame(501, (int) DailyUsage::query()->where('subscription_segment_id', $segmentId)->value('units'));
+        $this->assertSame(501, UsageEvent::query()->whereNotNull('processed_at')->count());
     }
 
     public function test_invoice_rejects_unaggregated_usage()
     {
         $plan = $this->plan('Pending', 100, 0, '1.000000');
         $subscriptionId = app(SubscriptionManager::class)->start($this->customerId, $plan->id, '2025-10-01T00:00:00Z');
-        $segmentId = DB::table('subscription_segments')->where('subscription_id', $subscriptionId)->value('id');
-        DB::table('usage_events')->insert([
+        $segmentId = SubscriptionSegment::query()->where('subscription_id', $subscriptionId)->value('id');
+        UsageEvent::query()->insert([
             'merchant_id' => $this->merchantId, 'customer_id' => $this->customerId,
             'subscription_segment_id' => $segmentId, 'event_id' => 'pending',
             'occurred_at' => '2025-10-10 10:00:00.000000', 'units' => 1,
@@ -169,8 +175,8 @@ class BillingFlowTest extends TestCase
     {
         $plan = $this->plan('Close', 3100, 310, '2.000000');
         $subscriptionId = app(SubscriptionManager::class)->start($this->customerId, $plan->id, '2025-10-01T00:00:00Z');
-        $segmentId = DB::table('subscription_segments')->where('subscription_id', $subscriptionId)->value('id');
-        DB::table('usage_events')->insert([
+        $segmentId = SubscriptionSegment::query()->where('subscription_id', $subscriptionId)->value('id');
+        UsageEvent::query()->insert([
             'merchant_id' => $this->merchantId, 'customer_id' => $this->customerId,
             'subscription_segment_id' => $segmentId, 'event_id' => 'month-close-event',
             'occurred_at' => '2025-10-10 10:00:00.000000', 'units' => 350,
@@ -179,22 +185,22 @@ class BillingFlowTest extends TestCase
         $this->artisan('billing:close', ['month' => '2025-10'])->assertExitCode(0);
         $this->artisan('billing:close', ['month' => '2025-10'])->assertExitCode(0);
 
-        $this->assertSame(350, (int) DB::table('daily_usage')->where('subscription_segment_id', $segmentId)->value('units'));
-        $this->assertSame(1, DB::table('invoices')->where('subscription_id', $subscriptionId)->count());
-        $this->assertSame(3180, (int) DB::table('invoices')->where('subscription_id', $subscriptionId)->value('total_minor'));
+        $this->assertSame(350, (int) DailyUsage::query()->where('subscription_segment_id', $segmentId)->value('units'));
+        $this->assertSame(1, Invoice::query()->where('subscription_id', $subscriptionId)->count());
+        $this->assertSame(3180, (int) Invoice::query()->where('subscription_id', $subscriptionId)->value('total_minor'));
     }
 
     public function test_one_unit_over_allowance_uses_fractional_rate_and_rounds_the_line()
     {
         $plan = $this->plan('Fractional', 1000, 100, '0.500000');
         $subscriptionId = app(SubscriptionManager::class)->start($this->customerId, $plan->id, '2025-10-01T00:00:00Z');
-        $segmentId = DB::table('subscription_segments')->where('subscription_id', $subscriptionId)->value('id');
+        $segmentId = SubscriptionSegment::query()->where('subscription_id', $subscriptionId)->value('id');
         $this->daily($segmentId, '2025-10-10', 101);
 
         $invoiceId = app(InvoiceGenerator::class)->generate($subscriptionId, '2025-10');
 
-        $this->assertSame(1001, (int) DB::table('invoices')->where('id', $invoiceId)->value('total_minor'));
-        $this->assertSame(1, (int) DB::table('invoice_lines')->where('invoice_id', $invoiceId)
+        $this->assertSame(1001, (int) Invoice::query()->where('id', $invoiceId)->value('total_minor'));
+        $this->assertSame(1, (int) InvoiceLine::query()->where('invoice_id', $invoiceId)
             ->where('type', 'overage')->value('amount_minor'));
     }
 }

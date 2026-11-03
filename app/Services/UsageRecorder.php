@@ -2,9 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\UsageEvent;
+use App\Models\SubscriptionSegment;
+use App\Models\Subscription;
+use App\Models\Invoice;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\DB;
 
 class UsageRecorder
 {
@@ -12,7 +15,7 @@ class UsageRecorder
     {
         $occurredAt = Carbon::parse($data['occurred_at'])->utc()->format('Y-m-d H:i:s.u');
 
-        $existing = DB::table('usage_events')
+        $existing = UsageEvent::query()
             ->where('merchant_id', $merchantId)
             ->where('event_id', $data['event_id'])
             ->first();
@@ -20,8 +23,8 @@ class UsageRecorder
             return $this->duplicateResult($existing, $data, $occurredAt);
         }
 
-        return DB::transaction(function () use ($merchantId, $data, $occurredAt) {
-            $subscription = DB::table('subscriptions as subscription')
+        return Subscription::query()->getConnection()->transaction(function () use ($merchantId, $data, $occurredAt) {
+            $subscription = Subscription::query()->from('subscriptions as subscription')
                 ->join('customers as customer', 'customer.id', '=', 'subscription.customer_id')
                 ->where('customer.id', $data['customer_id'])
                 ->where('customer.merchant_id', $merchantId)
@@ -40,13 +43,13 @@ class UsageRecorder
 
             $monthStart = Carbon::parse($occurredAt, 'UTC')->startOfMonth()->format('Y-m-d H:i:s.u');
             $monthEnd = Carbon::parse($occurredAt, 'UTC')->startOfMonth()->addMonth()->format('Y-m-d H:i:s.u');
-            if (DB::table('invoices')->where('subscription_id', $subscription->id)
+            if (Invoice::query()->where('subscription_id', $subscription->id)
                 ->where('period_start', $monthStart)->where('period_end', $monthEnd)
                 ->where('status', 'finalized')->exists()) {
                 return ['status' => 409, 'body' => ['message' => 'The billing period is finalized.']];
             }
 
-            $segment = DB::table('subscription_segments')
+            $segment = SubscriptionSegment::query()
                 ->where('subscription_id', $subscription->id)
                 ->where('starts_at', '<=', $occurredAt)
                 ->where(function ($query) use ($occurredAt) {
@@ -60,7 +63,7 @@ class UsageRecorder
             }
 
             try {
-                $id = DB::table('usage_events')->insertGetId([
+                $id = UsageEvent::query()->insertGetId([
                     'merchant_id' => $merchantId,
                     'customer_id' => $data['customer_id'],
                     'subscription_segment_id' => $segment->id,
@@ -77,7 +80,7 @@ class UsageRecorder
                 }
             }
 
-            $existing = DB::table('usage_events')
+            $existing = UsageEvent::query()
                 ->where('merchant_id', $merchantId)
                 ->where('event_id', $data['event_id'])
                 ->lockForUpdate()

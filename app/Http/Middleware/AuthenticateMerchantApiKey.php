@@ -2,9 +2,9 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\MerchantApiKey;
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class AuthenticateMerchantApiKey
 {
@@ -16,7 +16,7 @@ class AuthenticateMerchantApiKey
             return response()->json(['message' => 'Invalid merchant API key.'], 401);
         }
 
-        $record = DB::table('merchant_api_keys')
+        $record = MerchantApiKey::query()
             ->join('merchants', 'merchants.id', '=', 'merchant_api_keys.merchant_id')
             ->where('merchant_api_keys.key_hash', hash('sha256', $key))
             ->where('merchant_api_keys.is_active', true)

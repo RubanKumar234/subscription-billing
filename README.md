@@ -27,6 +27,7 @@ Run tests with `php artisan test`. Tests use a separate MySQL database named `su
 - Redis plan-pricing cache with invalidation when a plan is saved or deleted through Eloquent.
 - `GET /merchants/{id}/dashboard`: top five customers, projected overage, and usage drops greater than 50% month over month.
 - Repeatable demo data and a separate MySQL test database.
+- Eloquent models for merchant, plan, customer, subscription, segment, usage event, daily total, invoice, invoice line, and API key queries. Daily aggregation retains one atomic MySQL upsert through the `DailyUsage` model connection to avoid lost increments under concurrent workers.
 
 The dashboard wireframe is a visual reference. The required dashboard is delivered as JSON.
 

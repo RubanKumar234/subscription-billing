@@ -2,8 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Models\MerchantApiKey;
+use App\Models\Merchant;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
 
 class IssueMerchantApiKey extends Command
 {
@@ -15,7 +16,7 @@ class IssueMerchantApiKey extends Command
     {
         $merchantId = (int) $this->argument('merchant_id');
 
-        if (! DB::table('merchants')->where('id', $merchantId)->where('status', 'active')->exists()) {
+        if (! Merchant::query()->where('id', $merchantId)->where('status', 'active')->exists()) {
             $this->error('Active merchant not found.');
 
             return 1;
@@ -23,7 +24,7 @@ class IssueMerchantApiKey extends Command
 
         $key = bin2hex(random_bytes(32));
 
-        DB::table('merchant_api_keys')->insert([
+        MerchantApiKey::query()->insert([
             'merchant_id' => $merchantId,
             'name' => $this->argument('name'),
             'key_hash' => hash('sha256', $key),

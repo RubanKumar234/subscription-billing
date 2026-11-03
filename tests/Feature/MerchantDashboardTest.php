@@ -2,11 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Models\SubscriptionSegment;
+use App\Models\Plan;
+use App\Models\MerchantApiKey;
+use App\Models\Merchant;
+use App\Models\DailyUsage;
+use App\Models\Customer;
 use App\Services\SubscriptionManager;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class MerchantDashboardTest extends TestCase
@@ -24,27 +29,27 @@ class MerchantDashboardTest extends TestCase
     {
         Carbon::setTestNow('2026-11-15 00:00:00 UTC');
         CarbonImmutable::setTestNow('2026-11-15 00:00:00 UTC');
-        $merchantId = DB::table('merchants')->insertGetId([
+        $merchantId = Merchant::query()->insertGetId([
             'name' => 'Dashboard Merchant', 'currency' => 'INR', 'status' => 'active',
         ]);
-        $planId = DB::table('plans')->insertGetId([
+        $planId = Plan::query()->insertGetId([
             'merchant_id' => $merchantId,
             'name' => 'Metered', 'currency' => 'INR', 'base_price_minor' => 0,
             'included_units' => 0, 'overage_rate_minor' => '2.000000',
             'billing_cycle' => 'monthly', 'is_active' => true,
         ]);
-        $customerId = DB::table('customers')->insertGetId([
+        $customerId = Customer::query()->insertGetId([
             'merchant_id' => $merchantId, 'name' => 'Falling Usage',
         ]);
         $subscriptionId = app(SubscriptionManager::class)->start($customerId, $planId, '2026-10-01T00:00:00Z');
-        $segmentId = DB::table('subscription_segments')->where('subscription_id', $subscriptionId)->value('id');
-        DB::table('daily_usage')->insert([
+        $segmentId = SubscriptionSegment::query()->where('subscription_id', $subscriptionId)->value('id');
+        DailyUsage::query()->insert([
             ['subscription_segment_id' => $segmentId, 'usage_date' => '2026-10-01', 'units' => 400],
             ['subscription_segment_id' => $segmentId, 'usage_date' => '2026-11-01', 'units' => 140],
         ]);
 
         $key = bin2hex(random_bytes(32));
-        DB::table('merchant_api_keys')->insert([
+        MerchantApiKey::query()->insert([
             'merchant_id' => $merchantId, 'name' => 'test',
             'key_hash' => hash('sha256', $key), 'is_active' => true,
         ]);
