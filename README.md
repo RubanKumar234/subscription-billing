@@ -1,23 +1,62 @@
-# Subscription Billing
+# Subscription Billing and Usage Metering
 
-Laravel 8 / PHP 7.4 backend for a multi-tenant subscription billing exercise. Merchants own plans and customers. Usage events are aggregated by day and billed each UTC calendar month, including mid-cycle plan changes.
+Laravel 8 / PHP 7.4 implementation of a multi-tenant subscription billing exercise. Merchants own plans and customers. Usage events are aggregated by day and billed each UTC calendar month, including mid-cycle plan changes.
+
+## Reviewer quick start
+
+This is a shared-database, merchant-scoped backend. The merchant API key selects the tenant; usage from another merchant's customer is rejected, and the dashboard returns only the authenticated merchant's data. The dashboard wireframe is represented by a JSON API rather than a browser page.
+
+1. Install PHP 7.4 with `bcmath`, `pdo_mysql`, and `redis`, plus Composer, MySQL, and Redis. Laragon is optional.
+2. Create the MySQL databases `subscriptionbilling` and `subscriptionbilling_test`.
+3. From the project directory, prepare the application:
+
+   ```powershell
+   composer install
+   Copy-Item .env.example .env
+   php artisan key:generate
+   ```
+
+4. Set the MySQL credentials in `.env`, start MySQL and Redis, then run:
+
+   ```powershell
+   php artisan config:clear
+   php artisan migrate
+   php artisan db:seed --class=DemoBillingSeeder
+   php artisan serve --host=127.0.0.1 --port=8000
+   ```
+
+5. Keep the server open. In another terminal, start `php artisan queue:work redis --tries=3`. A worker waits for jobs until stopped. For a one-time demo, use `php artisan queue:work redis --stop-when-empty --tries=3`.
+6. Issue a demo merchant key with `php artisan merchant:issue-key 1`. Use the merchant ID printed by the seeder if it differs from `1`.
+7. Run `& .\scripts\Test-Usage.ps1 -CustomerId 1` and paste the key. Use the customer ID printed by the seeder if it differs from `1`. The first request creates an event; the identical retry reports `duplicate: true` with the same database ID.
+8. Run `php artisan usage:aggregate`, let the worker process the job, and run `php artisan billing:close` for the previous completed UTC month. The close command queues aggregation before invoice generation and is safe to retry.
+9. Request the dashboard with the same key:
+
+   ```powershell
+   $key = Read-Host 'Paste merchant API key'
+   Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8000/merchants/1/dashboard' -Headers @{ 'X-Merchant-Key' = $key }
+   ```
+
+10. Run `php artisan test`. `phpunit.xml` uses `subscriptionbilling_test`, array cache, and a synchronous queue, so the automated tests do not need the live Redis worker. The suite passed all 18 tests on PHP 7.4 during local verification.
+
+Amounts in API responses and database rows are in minor currency units: `6140` INR means ₹61.40. Do not commit `.env` or share a raw merchant API key.
+
+To verify aggregation and invoicing in MySQL, inspect these tables after the worker finishes:
+
+```sql
+SELECT id, event_id, units, processed_at FROM usage_events ORDER BY id DESC LIMIT 10;
+SELECT subscription_segment_id, usage_date, units FROM daily_usage ORDER BY usage_date DESC LIMIT 10;
+SELECT id, subscription_id, period_start, period_end, total_minor FROM invoices ORDER BY id DESC;
+SELECT invoice_id, type, quantity, unit_rate_minor, amount_minor FROM invoice_lines ORDER BY invoice_id, id;
+```
 
 ## Requirements
 
-- Laragon PHP 7.4.29
+- PHP 7.4 with `bcmath`, `pdo_mysql`, and `redis` extensions; Laragon is optional
 - MySQL (configure credentials in `.env`)
 - Redis for cache and queued jobs
 - Composer for dependencies
 
-## Run locally
-
-1. Start Apache and MySQL in Laragon.
-2. Create a MySQL database named `subscriptionbilling`.
-3. Check database settings in `.env`.
-4. From this directory, run `php artisan migrate`.
-5. Open `http://subscriptionbilling.test` if Laragon auto virtual hosts are enabled, or run `php artisan serve`.
-
-Run tests with `php artisan test`. Tests use a separate MySQL database named `subscriptionbilling_test`; create it before running them. For this project, use the PHP 7.4 executable at `D:\work\tools\Laragon\bin\php\php-7.4.29-nts-Win32-vc15-x64\php.exe` when another PHP version is first on PATH. Run `composer install` if dependencies are absent.
+On the original Laragon machine, PHP 7.4 is at `D:\work\tools\Laragon\bin\php\php-7.4.29-nts-Win32-vc15-x64\php.exe`. If `php -v` shows another version, select PHP 7.4 in Laragon or invoke this executable directly. Use a PHP 7.4-compatible Composer runtime as well.
 
 ## Implemented features
 
@@ -45,11 +84,11 @@ The cache uses Redis database 1, while the queue uses the default Redis database
 
 ## Billing schema
 
-The schema adds `plans`, `customers`, `subscriptions`, `subscription_segments`, `usage_events`, `daily_usage`, `invoices`, and `invoice_lines` to the existing `merchants` table. `subscription_segments` preserve the plan price, allowance, overage rate, currency, and cycle that applied during each period, so later plan edits do not change historical billing. Cycle and segment intervals will use inclusive starts and exclusive ends.
+The schema adds `plans`, `customers`, `subscriptions`, `subscription_segments`, `usage_events`, `daily_usage`, `invoices`, and `invoice_lines` to the existing `merchants` table. `subscription_segments` preserve the plan price, allowance, overage rate, currency, and cycle that applied during each period, so later plan edits do not change historical billing. Cycle and segment intervals use inclusive starts and exclusive ends.
 
-Amounts are stored in minor currency units, except `overage_rate_minor` which uses `DECIMAL(18,6)` to allow fractional minor units per usage unit. The billing service will round calculated invoice-line amounts. All event and segment times are UTC.
+Amounts are stored in minor currency units, except `overage_rate_minor` which uses `DECIMAL(18,6)` to allow fractional minor units per usage unit. The billing service rounds calculated invoice-line amounts. All event and segment times are UTC.
 
-The unique `(merchant_id, event_id)` key prevents duplicate usage events, the unique `(subscription_segment_id, usage_date)` key prevents duplicate daily totals, and the unique invoice subscription/period key prevents duplicate cycle invoices. Aggregation must update daily totals and mark raw events processed in one transaction so a retried job does not double-count.
+The unique `(merchant_id, event_id)` key prevents duplicate usage events, the unique `(subscription_segment_id, usage_date)` key prevents duplicate daily totals, and the unique invoice subscription/period key prevents duplicate cycle invoices. Aggregation updates daily totals and marks raw events processed in one transaction so a retried job does not double-count.
 
 For 5 million or more raw events, reads should use the customer/time and aggregation indexes, process events in bounded batches, and use `daily_usage` for billing and dashboard queries. If growth warrants it, consider date partitioning and an archival policy for raw events.
 
