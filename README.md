@@ -1,8 +1,8 @@
 # Subscription Billing and Usage Metering
 
-Laravel 8 / PHP 7.4 implementation of a multi-tenant subscription billing exercise. Merchants own plans and customers. Usage events are aggregated by day and billed each UTC calendar month, including mid-cycle plan changes.
+Laravel 8 / PHP 7.4 backend for multi-tenant subscription billing. Merchants own plans and customers. Usage events are aggregated by day and billed each UTC calendar month, including mid-cycle plan changes.
 
-## Reviewer quick start
+## Quick start
 
 This is a shared-database, merchant-scoped backend. The merchant API key selects the tenant; usage from another merchant's customer is rejected, and the dashboard returns only the authenticated merchant's data. The dashboard wireframe is represented by a JSON API rather than a browser page.
 
@@ -131,7 +131,7 @@ In the November 2026 demo, Acme Customer's October invoice is ₹61.40: ₹15.00
 
 - Cycles are UTC calendar months with inclusive starts and exclusive ends. Monthly plans are supported. Event timestamps require an explicit timezone and are stored in UTC.
 - For each plan segment, base price is multiplied by active seconds divided by cycle seconds, then rounded half up to a minor currency unit. Included units use the same fraction and are rounded down to whole units.
-- Overage is calculated separately for each segment as `max(0, segment usage - prorated included units) × that segment's overage rate`, then rounded half up. BCMath avoids floating-point money calculations. Taxes, discounts, credits, refunds, and payments are outside this exercise.
+- Overage is calculated separately for each segment as `max(0, segment usage - prorated included units) × that segment's overage rate`, then rounded half up. BCMath avoids floating-point money calculations. Taxes, discounts, credits, refunds, and payments are outside the implemented scope.
 - Segment prices, allowance, currency, and rate are snapshots. Editing a plan does not change past or current segments. Merchant and plan currency must match.
 - A new event for a finalized month is rejected; an identical retry still succeeds. This avoids silently changing a final invoice. A production system could add adjustment invoices for late usage.
 - Churn compares current month-to-date daily totals with the same number of calendar days in the previous month. Previous usage must be positive, and the drop must be strictly greater than 50%.
@@ -145,6 +145,4 @@ Raw `usage_events` are the source of truth. The API key identifies the merchant,
 
 Tests cover duplicate/conflicting events, tenant access, rate limiting, exact plan-change boundaries, 500-event aggregation batches, retry-safe month close, mid-month proration, upgrades, downgrades, exact allowance, fractional-rate rounding, cache invalidation, dashboard metrics, and finalized-period behavior.
 
-The timebox trade-offs are monthly billing only, API/CLI delivery without a polished dashboard UI, and no payment collection or adjustment-invoice workflow. The dashboard loads one merchant's overlapping segments to project revenue; a much larger merchant would benefit from precomputed projections. PHP 7.4, Laravel 8, and the bundled Redis 3.2 installation are for this local exercise; supported versions should be used for production.
-
-See `INTERVIEW_GUIDE.md` for a speaking outline. Add screenshots of the actual AI prompts used during development under `prompts/` before submission.
+The scope is monthly billing with API and command-line workflows. Payments, tax, refunds, adjustment invoices, and a browser dashboard are not implemented. The dashboard loads one merchant's overlapping segments to project revenue; a much larger merchant would benefit from precomputed projections. This project uses PHP 7.4, Laravel 8, and the bundled Redis 3.2 installation for local development; supported versions should be used for production.
