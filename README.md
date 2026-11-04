@@ -26,7 +26,7 @@ This is a shared-database, merchant-scoped backend. The merchant API key selects
    ```
 
 5. Keep the server open. In another terminal, start `php artisan queue:work redis --tries=3`. A worker waits for jobs until stopped. For a one-time demo, use `php artisan queue:work redis --stop-when-empty --tries=3`.
-6. Issue a demo merchant key with `php artisan merchant:issue-key 1`. Use the merchant ID printed by the seeder if it differs from `1`.
+6. The seeder creates two merchants with separate plans, customers, and subscriptions. Issue a key for the first merchant with `php artisan merchant:issue-key 1`. Use the merchant ID printed by the seeder if it differs from `1`.
 7. Run `& .\scripts\Test-Usage.ps1 -CustomerId 1` and paste the key. Use the customer ID printed by the seeder if it differs from `1`. The first request creates an event; the identical retry reports `duplicate: true` with the same database ID.
 8. Run `php artisan usage:aggregate`, let the worker process the job, and run `php artisan billing:close` for the previous completed UTC month. The close command queues aggregation before invoice generation and is safe to retry.
 9. Request the dashboard with the same key:
@@ -35,6 +35,8 @@ This is a shared-database, merchant-scoped backend. The merchant API key selects
    $key = Read-Host 'Paste merchant API key'
    Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8000/merchants/1/dashboard' -Headers @{ 'X-Merchant-Key' = $key }
    ```
+
+   For a tenant-isolation demo, issue a separate key for the second merchant using its seeder ID. Its dashboard shows Gamma Customer's usage. The first merchant's key receives `403` when requesting the second merchant's dashboard, and the second merchant's key cannot submit usage for Acme or Beta.
 
 10. Run `php artisan test`. `phpunit.xml` uses `subscriptionbilling_test`, array cache, and a synchronous queue, so the automated tests do not need the live Redis worker. The suite passed all 18 tests on PHP 7.4 during local verification.
 
@@ -115,7 +117,7 @@ Responses: `201` for a new event, `200` for an identical retry, `409` if the eve
 
 ## Demo and operational commands
 
-Run `php artisan db:seed --class=DemoBillingSeeder`. It prints demo merchant, plan, customer, and subscription IDs. The seeder is repeatable; it creates an upgrade and usage in the previous and current months. Issue a key with `php artisan merchant:issue-key <merchant_id>`, then use that key in the `X-Merchant-Key` header for both endpoints. Only the key hash is stored; use HTTPS outside local development.
+Run `php artisan db:seed --class=DemoBillingSeeder`. It prints IDs for both demo merchants, their plans, customers, and subscriptions. The seeder is repeatable; the first merchant has an upgrade and usage in the previous and current months, while the second merchant has its own current-month usage. Issue a key with `php artisan merchant:issue-key <merchant_id>`, then use that key in the `X-Merchant-Key` header for both endpoints. Only the key hash is stored; use HTTPS outside local development.
 
 In PowerShell, `& .\scripts\Test-Usage.ps1 -CustomerId <customer_id>` prompts for the key, submits a new event, and retries the identical request. It prints the exact URL and both JSON responses. Start `php artisan serve --host=127.0.0.1 --port=8000` in another terminal first.
 

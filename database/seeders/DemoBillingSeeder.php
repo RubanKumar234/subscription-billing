@@ -57,9 +57,23 @@ class DemoBillingSeeder extends Seeder
         $this->event($merchantId, $customerOne, 'demo-'.$currentStart->format('Y-m').'-acme', CarbonImmutable::now('UTC'), 120);
         $this->event($merchantId, $customerTwo, 'demo-'.$currentStart->format('Y-m').'-beta', CarbonImmutable::now('UTC'), 300);
 
+        $otherMerchant = Merchant::query()->firstOrCreate(
+            ['name' => 'Second Billing Demo'],
+            ['status' => 'active', 'currency' => 'INR']
+        );
+        $otherPlan = Plan::firstOrCreate(
+            ['merchant_id' => $otherMerchant->id, 'name' => 'Starter'],
+            ['currency' => 'INR', 'base_price_minor' => 1500, 'included_units' => 100,
+                'overage_rate_minor' => '1.500000', 'billing_cycle' => 'monthly', 'is_active' => true]
+        );
+        $otherCustomer = $this->customer($otherMerchant->id, 'Gamma Customer');
+        $otherSubscription = $this->subscription($manager, $otherCustomer, $otherPlan->id, $currentStart);
+        $this->event($otherMerchant->id, $otherCustomer, 'demo-'.$currentStart->format('Y-m').'-gamma', CarbonImmutable::now('UTC'), 80);
+
         $this->command->info('Demo merchant ID: '.$merchantId.'. Issue a key with: php artisan merchant:issue-key '.$merchantId);
         $this->command->info('Plans: Basic='.$basic->id.', Growth='.$growth->id.'. Customers: Acme='.$customerOne.', Beta='.$customerTwo.'.');
         $this->command->info('Subscriptions: Acme='.$subscriptionOne.', Beta='.$subscriptionTwo.'.');
+        $this->command->info('Second merchant ID: '.$otherMerchant->id.'. Plan: Starter='.$otherPlan->id.'. Customer: Gamma='.$otherCustomer.'. Subscription: '.$otherSubscription.'.');
         $this->command->info('Run billing:close '.$previousStart->format('Y-m').' to generate last month\'s invoices.');
     }
 
