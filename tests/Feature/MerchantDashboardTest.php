@@ -48,6 +48,24 @@ class MerchantDashboardTest extends TestCase
             ['subscription_segment_id' => $segmentId, 'usage_date' => '2026-11-01', 'units' => 140],
         ]);
 
+        $otherMerchantId = Merchant::query()->insertGetId([
+            'name' => 'Other Dashboard Merchant', 'currency' => 'INR', 'status' => 'active',
+        ]);
+        $otherPlanId = Plan::query()->insertGetId([
+            'merchant_id' => $otherMerchantId,
+            'name' => 'Other Metered', 'currency' => 'INR', 'base_price_minor' => 0,
+            'included_units' => 0, 'overage_rate_minor' => '2.000000',
+            'billing_cycle' => 'monthly', 'is_active' => true,
+        ]);
+        $otherCustomerId = Customer::query()->insertGetId([
+            'merchant_id' => $otherMerchantId, 'name' => 'Other Customer',
+        ]);
+        $otherSubscriptionId = app(SubscriptionManager::class)->start($otherCustomerId, $otherPlanId, '2026-10-01T00:00:00Z');
+        $otherSegmentId = SubscriptionSegment::query()->where('subscription_id', $otherSubscriptionId)->value('id');
+        DailyUsage::query()->insert([
+            'subscription_segment_id' => $otherSegmentId, 'usage_date' => '2026-11-01', 'units' => 1000,
+        ]);
+
         $key = bin2hex(random_bytes(32));
         MerchantApiKey::query()->insert([
             'merchant_id' => $merchantId, 'name' => 'test',
@@ -62,9 +80,10 @@ class MerchantDashboardTest extends TestCase
             ->assertJsonPath('top_customers.0.customer_id', $customerId)
             ->assertJsonPath('top_customers.0.usage_units', 140)
             ->assertJsonPath('projected_overage_revenue_minor', 600)
-            ->assertJsonPath('churn_risk_customers.0.drop_percent', 65);
+            ->assertJsonPath('churn_risk_customers.0.drop_percent', 65)
+            ->assertJsonCount(1, 'top_customers');
 
         $this->withHeader('X-Merchant-Key', $key)
-            ->getJson('/merchants/'.($merchantId + 1).'/dashboard')->assertForbidden();
+            ->getJson('/merchants/'.$otherMerchantId.'/dashboard')->assertForbidden();
     }
 }
