@@ -56,7 +56,7 @@ SELECT invoice_id, type, quantity, unit_rate_minor, amount_minor FROM invoice_li
 - Redis for cache and queued jobs
 - Composer for dependencies
 
-On the original Laragon machine, PHP 7.4 is at `D:\work\tools\Laragon\bin\php\php-7.4.29-nts-Win32-vc15-x64\php.exe`. If `php -v` shows another version, select PHP 7.4 in Laragon or invoke this executable directly. Use a PHP 7.4-compatible Composer runtime as well.
+If `php -v` shows another version, select PHP 7.4 in Laragon or invoke your PHP 7.4 executable directly. Use a PHP 7.4-compatible Composer runtime as well.
 
 ## Implemented features
 
